@@ -1,0 +1,13 @@
+{
+  "name": "overcharge-royale",
+  "version": "1.0.0",
+  "description": "Top-down battle royale HTML5 game with overpowered weapons, secret underground bunker, duo/squad modes and Firebase online multiplayer",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8811",
+    "test": "node --test tests/"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>오버차지 로얄</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="cv"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="topLeft">
+      <div class="pill">생존 <b id="aliveN">0</b></div>
+      <div class="pill">킬 <b id="killN">0</b></div>
+      <div id="zoneMsg" class="pill"></div>
+      <div id="team"></div>
+    </div>
+    <div id="topRight">
+      <canvas id="minimap" width="190" height="190"></canvas>
+      <div id="feed"></div>
+    </div>
+    <div id="banner"></div>
+    <div id="spectate" class="hidden"></div>
+    <div id="centerLow">
+      <div id="prompt" class="hidden"></div>
+      <div id="progress" class="hidden"><div id="progressFill"></div><span id="progressText"></span></div>
+    </div>
+    <div id="bottomLeft">
+      <div id="heals"></div>
+      <div id="gear"></div>
+    </div>
+    <div id="bottomCenter">
+      <div id="weaponName"></div>
+      <div id="ammoBig"><b id="magN">0</b> / <span id="resN">0</span></div>
+      <div id="boostBar"><div id="boostFill"></div></div>
+      <div id="hpBar"><div id="hpFill"></div><span id="hpText">100</span></div>
+    </div>
+    <div id="bottomRight">
+      <div id="ammoInv"></div>
+      <div id="slots"></div>
+    </div>
+    <div id="board" class="hidden"></div>
+  </div>
+
+  <div id="bigmap" class="hidden"><canvas id="bigmapCv" width="640" height="640"></canvas><p>M 키로 닫기</p></div>
+
+  <div id="escMenu" class="hidden">
+    <div class="card small">
+      <h2>일시정지</h2>
+      <p class="muted">온라인 경기에서는 게임이 멈추지 않습니다.</p>
+      <button id="escResume" class="primary">계속하기</button>
+      <button id="escLeave">로비로 나가기</button>
+    </div>
+  </div>
+
+  <div id="result" class="hidden">
+    <div class="card">
+      <h2 id="resultTitle"></h2>
+      <div id="resultStats"></div>
+      <p id="resultSub" class="muted"></p>
+      <div id="resultWardrobe" class="hidden">
+        <label for="resultWardrobeCode">공용 옷장 접근 카드</label>
+        <div class="row">
+          <input id="resultWardrobeCode" readonly spellcheck="false">
+          <button id="copyWardrobeCode" type="button">코드 복사</button>
+        </div>
+      </div>
+      <div id="resultBtns"></div>
+    </div>
+  </div>
+
+  <div id="menu">
+    <div class="menuWrap">
+      <header>
+        <h1>OVERCHARGE <span>ROYALE</span></h1>
+        <p class="tag">탑다운 배틀로얄 × 말도 안 되는 무기들</p>
+      </header>
+
+      <section class="card">
+        <label class="lbl" for="nameInput">이름</label>
+        <input id="nameInput" maxlength="12" autocomplete="off">
+        <div class="lbl">캐릭터 색</div>
+        <div id="skins"></div>
+        <div class="profileShop">
+          <div class="profileLoadout">
+            <canvas id="equippedPreview" width="88" height="88" aria-hidden="true"></canvas>
+            <div>
+              <span class="lbl">장착 중</span><strong id="equippedSkin">기본 스킨</strong>
+              <small id="equippedTag" class="muted hidden"></small>
+            </div>
+          </div>
+          <div class="profileWallet">
+            <span class="coinBalance"><b id="walletCoins">0</b> 코인</span>
+            <button id="btnShop" class="primary" type="button" aria-haspopup="dialog">스킨 상점</button>
+            <button id="btnWardrobe" type="button" aria-haspopup="dialog">공용 옷장</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card modes">
+        <div class="mode">
+          <span class="lbl0">인원 모드</span>
+          <div id="teamModes" class="seg" role="radiogroup">
+            <button data-m="solo" class="on">솔로</button>
+            <button data-m="duo">듀오 (2인)</button>
+            <button data-m="squad">스쿼드 (4인)</button>
+          </div>
+        </div>
+        <div class="mode">
+          <button id="btnSolo" class="primary big">봇 배틀로얄</button>
+          <label class="inline">총 인원
+            <select id="botCount">
+              <option value="24">25명</option>
+              <option value="49" selected>50명</option>
+              <option value="79">80명</option>
+            </select>
+          </label>
+          <span class="muted">듀오·스쿼드는 봇 팀원이 함께 싸웁니다</span>
+        </div>
+        <div class="mode">
+          <button id="btnRange" class="big">무기 시험장</button>
+          <span class="muted">모든 무기 체험 · 탄약 무한</span>
+        </div>
+        <form id="onlineForm" class="mode">
+          <input id="roomInput" aria-label="방 코드" placeholder="방 코드 (기본 PUBLIC)" maxlength="16" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          <button id="btnOnline" class="big" type="submit">온라인 방 입장</button>
+        </form>
+        <div id="netStatus" role="status"></div>
+      </section>
+
+      <section id="roomPanel" class="card hidden">
+        <div class="row">
+          <h2 id="roomTitle">방</h2>
+          <button id="btnInvite" type="button">초대 링크 복사</button>
+          <button id="btnLeaveRoom" type="button">방 나가기</button>
+        </div>
+        <div id="inviteStatus" role="status"></div>
+        <input id="inviteUrl" class="hidden" aria-label="초대 링크" type="url" readonly>
+        <ul id="roomPlayers"></ul>
+        <label class="inline">내 팀 고르기
+          <select id="teamPref">
+            <option value="0">자동 배정</option>
+            <option value="1">1팀</option><option value="2">2팀</option><option value="3">3팀</option><option value="4">4팀</option>
+            <option value="5">5팀</option><option value="6">6팀</option><option value="7">7팀</option><option value="8">8팀</option>
+          </select>
+          <span class="muted">같은 팀 번호를 고른 친구끼리 한 팀 (듀오·스쿼드)</span>
+        </label>
+        <p id="roomInfo" class="muted"></p>
+        <button id="btnStart" class="primary big">경기 시작</button>
+      </section>
+
+      <section class="card">
+        <details>
+          <summary>조작법</summary>
+          <ul class="keys">
+            <li><kbd>W A S D</kbd> 이동 · <kbd>마우스</kbd> 조준 · <kbd>클릭</kbd>/<kbd>Space</kbd> 공격</li>
+            <li><kbd>1</kbd><kbd>2</kbd> 총 · <kbd>3</kbd> 근접 · <kbd>4</kbd> 투척 · <kbd>Q</kbd> 이전 무기 · <kbd>휠</kbd> 전환</li>
+            <li><kbd>R</kbd> 재장전 · <kbd>F</kbd> 줍기(총·근접 무기, 나머지는 자동) · 해치 위에서 <kbd>F</kbd> 지하 벙커 출입</li>
+            <li><kbd>7</kbd> 붕대 · <kbd>8</kbd> 구급상자 · <kbd>9</kbd> 에너지 음료 · <kbd>0</kbd> 진통제</li>
+            <li><kbd>M</kbd> 전체 지도 · <kbd>Tab</kbd> 순위표 · <kbd>Esc</kbd> 메뉴</li>
+          </ul>
+          <p class="muted">붉은 자기장 밖에 있으면 피해를 입습니다. 신화 무기는 보급 상자와 <b>비밀 지하 벙커</b>에서 나옵니다. 지도 곳곳의 철제 해치를 찾아보세요 (지도에는 표시되지 않습니다).</p>
+        </details>
+        <div class="row">
+          <button id="btnCodex">무기 도감</button>
+          <button id="btnMute">🔊 소리 켜짐</button>
+        </div>
+        <div id="codex" class="hidden"><div id="codexBody"></div></div>
+      </section>
+    </div>
+  </div>
+
+  <dialog id="shop" aria-labelledby="shopTitle">
+    <div class="shopHead">
+      <h2 id="shopTitle">스킨 상점</h2>
+      <div class="profileWallet">
+        <span class="coinBalance"><b id="shopCoins">0</b> 코인</span>
+        <form method="dialog"><button type="submit" autofocus>닫기</button></form>
+      </div>
+    </div>
+    <p class="shopEarnings">배틀로얄 완료 10코인 · 처치당 5코인 · 순위 보너스 최대 40코인</p>
+    <p id="shopStatus" role="status" aria-live="polite"></p>
+    <ul id="shopItems" class="shopItems"></ul>
+  </dialog>
+
+  <dialog id="wardrobe" aria-labelledby="wardrobeTitle">
+    <div class="shopHead">
+      <h2 id="wardrobeTitle">공용 옷장</h2>
+      <form method="dialog"><button type="submit">닫기</button></form>
+    </div>
+    <form id="wardrobeAccess" class="wardrobeForm">
+      <label for="wardrobeCode">접근 카드 코드</label>
+      <p class="muted" id="wardrobeAccessHint">배틀로얄에서 1위 하면 받는 코드를 입력하세요.</p>
+      <div class="wardrobeFields">
+        <input id="wardrobeCode" type="text" maxlength="24" autocomplete="off" autocapitalize="characters"
+               spellcheck="false" aria-describedby="wardrobeAccessHint" required>
+        <button type="submit" class="primary">옷장 열기</button>
+      </div>
+    </form>
+    <p id="wardrobeStatus" class="wardrobeStatus" role="status"></p>
+    <div id="wardrobeContents" class="hidden">
+      <section class="wardrobeSection" aria-labelledby="wardrobeShareTitle">
+        <h3 id="wardrobeShareTitle" tabindex="-1">내 스킨 올리기</h3>
+        <p class="muted">공용 옷장에 올린 스킨은 코드를 아는 사람도 장착할 수 있습니다.</p>
+        <p id="wardrobeNeedSkin" class="muted hidden">스킨 상점에서 구매한 스킨을 올릴 수 있습니다.</p>
+        <form id="wardrobeShare" class="wardrobeFields">
+          <label for="wardrobeSkin">구매한 스킨
+            <select id="wardrobeSkin" required></select>
+          </label>
+          <label for="wardrobeTag">이름표
+            <input id="wardrobeTag" type="text" maxlength="18" autocomplete="off" required>
+          </label>
+          <button id="wardrobeSave" type="submit" class="primary">이름표 저장</button>
+        </form>
+      </section>
+      <section class="wardrobeSection" aria-labelledby="wardrobeListTitle">
+        <div class="shopHead">
+          <h3 id="wardrobeListTitle">공유된 스킨</h3>
+          <button id="wardrobeRefresh" class="hidden" type="button">다시 연결</button>
+        </div>
+        <p id="wardrobeEmpty" class="muted hidden">아직 공유된 스킨이 없습니다.</p>
+        <ul id="wardrobeItems" class="shopItems"></ul>
+      </section>
+    </div>
+  </dialog>
+
+  <script src="js/config.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/cosmetics.js"></script>
+  <script src="js/economy.js"></script>
+  <script src="js/weapons.js"></script>
+  <script src="js/items.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/zone.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/combat.js"></script>
+  <script src="js/bots.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/hud.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/wardrobe.js"></script>
+  <script src="js/wardrobe-ui.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/lobby.js"></script>
+</body>
+</html>
