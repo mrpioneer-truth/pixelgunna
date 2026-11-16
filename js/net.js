@@ -1,8 +1,8 @@
 'use strict';
 // 온라인 방·경기 동기화.
 // rooms/{room}/presence/{uid}  : 접속자 {n, c, st:'lobby'|'play'|'spec', t}
-// rooms/{room}/match           : 현재 경기 {id, seed, startAt, roster:{uid:true}, host, ended}
-// rooms/{room}/m/{id}/p/{uid}  : 플레이어 상태(초당 15회)
+// rooms/{room}/match           : 현재 경기 {id, mode, seed, startAt, roster:{uid:팀}, bots:[봇별 팀], host, ended}
+// rooms/{room}/m/{id}/p/{uid}  : 플레이어 상태(초당 15회). 봇(bot0…)은 방장이 계산해 초당 8회 묶어서 올린다
 // rooms/{room}/m/{id}/e/{key}  : 사건(shot·melee·throw·drop·kill), t=서버시각(ms)
 // rooms/{room}/m/{id}/tk/{lootId} : 아이템을 주운 uid (트랜잭션으로 선점)
 // rooms/{room}/m/{id}/ds/{obsId}  : 부서진 장애물 → 부순 uid
@@ -11,6 +11,8 @@
   const C = ZR.CONFIG;
   const ROOM_RE = /^[A-Za-z0-9_-]{1,16}$/;
   const MAX_TEAM_PREF = 8;
+  const MAX_BOTS = 60;
+  const BOT_STATE_GAP = 1 / 8;
 
   let store = null;
   let uid = '';
@@ -22,6 +24,7 @@
   let match = null;
   let world = null;
   let sendT = 0;
+  let botSendT = 0;
 
   const base = () => `rooms/${room}`;
   const mBase = () => `rooms/${room}/m/${match.id}`;
@@ -130,14 +133,37 @@
     if (room) store.update(`${base()}/presence/${uid}`, { tm: ZR.U.clamp(tm | 0, 0, MAX_TEAM_PREF) });
   }
 
-  function startMatch(mode = 'solo') {
+  // 봇 배치 계획: 총 인원(total)이 될 때까지 봇을 넣는다.
+  // 먼저 사람 팀의 빈자리를 채우고, 남는 봇은 새 팀(사람 팀 번호 다음부터)으로 묶는다. 결과[i] = i번째 봇의 팀
+  function planBots(roster, size, total) {
+    const count = {};
+    Object.values(roster).forEach((t) => { count[t] = (count[t] || 0) + 1; });
+    const humans = Object.keys(roster).length;
+    const n = Math.max(0, Math.min(MAX_BOTS, total - humans));
+    const teams = [];
+    Object.keys(count).map(Number).sort((a, b) => a - b).forEach((t) => {
+      while (teams.length < n && count[t] < size) {
+        teams.push(t);
+        count[t]++;
+      }
+    });
+    let next = Math.max(0, ...Object.keys(count).map(Number)) + 1;
+    while (teams.length < n) {
+      for (let k = 0; k < size && teams.length < n; k++) teams.push(next);
+      next++;
+    }
+    return teams;
+  }
+
+  function startMatch(mode = 'solo', total = 0) {
     const old = lobbyState.match;
     if (old && old.id) store.remove(`${base()}/m/${old.id}`);
     const size = C.teamSizes[mode] || 1;
     const players = lobbyState.players.some((p) => p.id === uid) ? lobbyState.players : [...lobbyState.players, { id: uid, tm: 0 }];
     const roster = assignTeams(players, size);
+    const bots = planBots(roster, size, Number(total) || 0);
     const id = store.newKey(`${base()}/m`);
-    return store.set(`${base()}/match`, { id, mode: C.teamSizes[mode] ? mode : 'solo', seed: ZR.U.randSeed(), startAt: store.now() + 4000, roster, host: uid, ended: false });
+    return store.set(`${base()}/match`, { id, mode: C.teamSizes[mode] ? mode : 'solo', seed: ZR.U.randSeed(), startAt: store.now() + 4000, roster, bots, host: uid, ended: false });
   }
 
   // 경기가 아직 참가 가능한가
@@ -153,6 +179,8 @@
     world = w;
     setPresence(asPlayer ? 'play' : 'spec');
     if (asPlayer) store.onDisconnectRemove(`${mBase()}/p/${uid}`);
+    // 방장의 봇: 방장 연결이 끊기면 봇도 함께 사라진다
+    w.ownedBots.forEach((id) => store.onDisconnectRemove(`${mBase()}/p/${id}`));
     matchSubs.push(store.on(`${mBase()}/p`, 'child_added', onPlayerState));
     matchSubs.push(store.on(`${mBase()}/p`, 'child_changed', onPlayerState));
     matchSubs.push(store.on(`${mBase()}/p`, 'child_removed', (k) => onPlayerGone(k)));
@@ -178,8 +206,9 @@
   function onPlayerState(id, s) {
     if (!world || id === uid || !s) return;
     let p = world.players.get(id);
+    if (p && world.isAuth(p)) return; // 내가 올린 내 봇 상태가 되돌아온 것
     if (!p) {
-      p = new ZR.Player(id, str(s.n) || '???', color(s.c), num(s.x), num(s.y));
+      p = new ZR.Player(id, str(s.n) || '???', color(s.c), num(s.x), num(s.y), !!s.bot);
       p.remote = true;
       world.addPlayer(p);
     }
@@ -226,7 +255,7 @@
       p.alive = false;
       p.rank = world.aliveCount() + 1;
       p.left = true;
-      world.pushFeed(null, id, 'left');
+      if (!p.isBot) world.pushFeed(null, id, 'left');
     }
   }
 
@@ -249,22 +278,44 @@
     return it && typeof it.id === 'string' && typeof it.type === 'string' && Number.isFinite(it.x) && Number.isFinite(it.y);
   }
 
-  function sendState(p) {
-    if (!match || !p) return;
-    store.set(`${mBase()}/p/${uid}`, {
+  function stateOf(p) {
+    return {
       n: p.name, c: p.color, x: Math.round(p.x), y: Math.round(p.y), a: +p.angle.toFixed(2), hp: Math.max(0, Math.round(p.hp)),
       al: p.alive ? 1 : 0, w: p.wid, b: p.beamOn ? 1 : 0, sp: +p.spin.toFixed(2), ch: +p.charge.toFixed(2),
       h: p.helmet, v: p.vest, k: p.kills, hl: p.action ? 1 : 0, tm: p.team,
-      sk: p.skin === 'default' ? null : p.skin, stg: p.skinTag || null,
-    });
+      sk: p.skin && p.skin !== 'default' ? p.skin : null, stg: p.skinTag || null, bot: p.isBot ? 1 : null,
+    };
   }
 
-  function tick(dt, me) {
-    if (!match || !me) return;
+  // 나 또는 내 봇 한 명의 상태 (사망 직후 즉시 알릴 때)
+  function sendState(p) {
+    if (!match || !p) return;
+    store.set(`${mBase()}/p/${p.id}`, stateOf(p));
+  }
+
+  // 살아 있는 내 봇들을 한 번에 올린다
+  function sendBots() {
+    const batch = {};
+    for (const id of world.ownedBots) {
+      const b = world.players.get(id);
+      if (b && b.alive) batch[id] = stateOf(b);
+    }
+    if (Object.keys(batch).length) store.update(`${mBase()}/p`, batch);
+  }
+
+  function tick(dt, w) {
+    if (!match || !w) return;
+    const me = w.local;
     sendT -= dt;
-    if (sendT > 0) return;
-    sendT = C.netStateGap;
-    sendState(me);
+    if (me && sendT <= 0) {
+      sendT = C.netStateGap;
+      sendState(me);
+    }
+    botSendT -= dt;
+    if (w.ownedBots.size && botSendT <= 0) {
+      botSendT = BOT_STATE_GAP;
+      sendBots();
+    }
   }
 
   function markEnded() {
@@ -274,14 +325,17 @@
   function leaveMatch() {
     matchSubs.forEach((off) => off());
     matchSubs = [];
-    if (match && store) store.remove(`${mBase()}/p/${uid}`).catch((err) => ZR.log('경기 나가기 저장 실패', err));
+    if (match && store) {
+      store.remove(`${mBase()}/p/${uid}`).catch((err) => ZR.log('경기 나가기 저장 실패', err));
+      if (world) world.ownedBots.forEach((id) => store.remove(`${mBase()}/p/${id}`).catch((err) => ZR.log('봇 정리 실패', err)));
+    }
     if (room && match) setPresence('lobby');
     match = null;
     world = null;
   }
 
   ZR.Net = {
-    connect, normalizeRoom, joinRoom, updateProfile, leaveRoom, startMatch, assignTeams, setTeamPref, canJoin, enterMatch, leaveMatch, tick, markEnded,
+    connect, normalizeRoom, joinRoom, updateProfile, leaveRoom, startMatch, assignTeams, planBots, setTeamPref, canJoin, enterMatch, leaveMatch, tick, markEnded,
     get uid() { return uid; },
     get store() { return store; },
     serverNow: () => (store ? store.now() : Date.now()),

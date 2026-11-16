@@ -130,17 +130,23 @@
       const team = rosterTeam > 0 ? rosterTeam : 1000 + (U.hashStr(uid) % 100000);
       let pos = world.spawnPoint(uid);
       if (world.teamMode !== 'solo' && rosterTeam > 0) {
-        const base = world.spawnPoint(`team${team}`);
+        const base = world.teamBase(team);
         pos = ZR.MapGen.nearbyClear(world.map, base.x, base.y, U.rng(U.hashStr(uid)));
       }
       const me = world.addPlayer(profilePlayer(profile, uid, pos));
       me.team = team;
       giveStarter(me);
     }
+    // 봇은 경기를 시작한 방장 브라우저가 계산한다
+    const botTeams = Array.isArray(match.bots) ? match.bots.map(Number).filter((t) => t > 0) : [];
+    if (match.host === ZR.Net.uid && botTeams.length) {
+      ZR.Bots.spawnOnline(world, botTeams, new Set(Object.values(match.roster || {}).map(Number)));
+    }
     hooks = ZR.Net.enterMatch(match, world, asPlayer);
     G.netMatch = match;
     begin(world, 'online');
-    if (world.time < 0) ZR.HUD.banner(`곧 시작합니다… 참가자 ${Object.keys(match.roster || {}).length}명`, 3.5);
+    const humans = Object.keys(match.roster || {}).length;
+    if (world.time < 0) ZR.HUD.banner(`곧 시작합니다… 사람 ${humans}명${botTeams.length ? ` + 봇 ${botTeams.length}명` : ''}`, 3.5);
     else if (!asPlayer) ZR.HUD.banner('진행 중인 경기를 관전합니다', 3);
   }
 
@@ -153,6 +159,7 @@
     G.ended = false;
     G.deathShown = false;
     G.teamSpecShown = false;
+    G.markedEnd = false;
     G.specIdx = 0;
     const me = world.local;
     if (me) {
@@ -226,7 +233,7 @@
         world.update(dt);
       }
       if (G.mode === 'range') refillRange(world);
-      if (world.online) ZR.Net.tick(dt, world.local);
+      if (world.online) ZR.Net.tick(dt, world);
       checkEnd(world);
       if (!draw) return;
       const focus = cameraFocus(world);
@@ -317,6 +324,7 @@
   // ---- 종료 판정 ----
   // 팀 단위 판정: 살아 있는 팀이 하나 남으면 그 팀 승리. 솔로는 1인 1팀
   function checkEnd(world) {
+    if (world.online) markOnlineEnd(world);
     if (G.mode === 'range' || G.ended) return;
     const me = world.local;
     const teams = world.aliveTeams();
@@ -351,6 +359,16 @@
     }
   }
 
+  // 마지막 한 팀만 남았거나 사람이 모두 탈락하면 방 경기를 끝냄으로 표시한다 (봇끼리 남아 있어도 다음 경기를 시작할 수 있게)
+  function markOnlineEnd(world) {
+    if (G.markedEnd || world.time < 3) return;
+    const humanAlive = [...world.players.values()].some((p) => p.alive && !p.isBot);
+    if (world.aliveTeams().size <= 1 || !humanAlive) {
+      G.markedEnd = true;
+      ZR.Net.markEnded();
+    }
+  }
+
   function killerText(world, me) {
     const k = world.players.get(me.killedBy);
     if (k && k !== me) return `${k.name}에게 처치됨`;
@@ -368,7 +386,10 @@
     buttons.push({ label: '로비로', primary: G.mode !== 'solo', onClick: exit });
     const total = world.teamCount();
     const eligible = total > 1;
-    const sub = world.online ? 'Tab 순위표 · 다른 참가자의 경기는 계속됩니다' : '';
+    const hostBots = world.online && world.ownedBots.size > 0 && [...world.ownedBots].some((id) => world.players.get(id)?.alive);
+    const sub = !world.online ? ''
+      : hostBots ? 'Tab 순위표 · 봇은 방장 화면에서 움직입니다. 친구들이 끝날 때까지 "관전하기"로 남아 주세요'
+        : 'Tab 순위표 · 다른 참가자의 경기는 계속됩니다';
     ZR.HUD.result({
       title, rank: me.rank || 1, total, kills: me.kills, dmg: me.dmgDealt,
       sub: eligible ? '코인 정산 중…' : sub,

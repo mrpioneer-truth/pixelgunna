@@ -217,9 +217,11 @@
     }
     const btn = $('btnStart');
     const info = $('roomInfo');
+    $('roomFillWrap').classList.toggle('hidden', !s.isHost);
     if (live) {
       const joinable = ZR.Net.canJoin(s.match) && L.enteredId !== s.match.id;
-      info.textContent = `${MODE_LABEL[s.match.mode] || '솔로'} 경기 진행 중 (참가 ${Object.keys(s.match.roster || {}).length}명)`;
+      const botN = Array.isArray(s.match.bots) ? s.match.bots.length : 0;
+      info.textContent = `${MODE_LABEL[s.match.mode] || '솔로'} 경기 진행 중 (사람 ${Object.keys(s.match.roster || {}).length}명${botN ? ` + 봇 ${botN}명` : ''})`;
       btn.textContent = joinable ? '지금 참가하기' : '관전하기';
       btn.disabled = L.inGame;
       btn.onclick = () => {
@@ -227,10 +229,12 @@
         enterGame(s.match, joinable);
       };
     } else if (s.isHost) {
-      info.textContent = `방장입니다. 위에서 고른 [${MODE_LABEL[L.teamMode]}] 모드로 시작합니다. 지금 ${s.players.length}명.`;
+      const total = Number($('roomFill').value) || 0;
+      const bots = Math.max(0, total - s.players.length);
+      info.textContent = `방장입니다. [${MODE_LABEL[L.teamMode]}] 모드 · 사람 ${s.players.length}명${bots ? ` + 봇 ${bots}명` : ''}으로 시작합니다.`;
       btn.textContent = `${MODE_LABEL[L.teamMode]} 경기 시작`;
       btn.disabled = L.inGame;
-      btn.onclick = () => ZR.Net.startMatch(L.teamMode).catch((err) => status(`시작 실패: ${err.message}`, true));
+      btn.onclick = () => ZR.Net.startMatch(L.teamMode, total).catch((err) => status(`시작 실패: ${err.message}`, true));
     } else {
       info.textContent = '방장이 경기를 시작하길 기다리는 중…';
       btn.textContent = '대기 중';
@@ -278,6 +282,12 @@
       b.onclick = () => setTeamMode(b.dataset.m);
     });
     setTeamMode(localStorage.getItem('zr.teamMode') || 'solo');
+    const savedFill = localStorage.getItem('zr.roomFill');
+    if (savedFill && [...$('roomFill').options].some((o) => o.value === savedFill)) $('roomFill').value = savedFill;
+    $('roomFill').onchange = () => {
+      localStorage.setItem('zr.roomFill', $('roomFill').value);
+      if (L.lobby && L.room) onLobby({ ...L.lobby, now: ZR.Net.serverNow() });
+    };
     $('teamPref').onchange = () => ZR.Net.setTeamPref(Number($('teamPref').value));
     $('btnRange').onclick = () => {
       ZR.Audio.unlock();

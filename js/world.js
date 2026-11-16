@@ -42,15 +42,22 @@
       this.time = 0;
       this.dropSeq = 0;
       this.shakeAmt = 0;
+      this.ownedBots = new Set();
     }
 
     get local() { return this.players.get(this.localId) || null; }
     get online() { return this.mode === 'online'; }
-    isAuth(p) { return !this.online || p.id === this.localId; }
-    ownsShot(owner) { return !this.online || owner === this.localId; }
+    // 이 브라우저가 계산하는 캐릭터인가: 솔로는 전부, 온라인은 나 + 내가(방장) 돌리는 봇
+    isAuth(p) { return !this.online || p.id === this.localId || this.ownedBots.has(p.id); }
+    ownsShot(owner) { return !this.online || owner === this.localId || this.ownedBots.has(owner); }
 
     addPlayer(p) { this.players.set(p.id, p); return p; }
     aliveCount() { let n = 0; for (const p of this.players.values()) if (p.alive) n++; return n; }
+
+    // 팀 출발 기준점: 다른 플레이어 위치와 무관하게 시드만으로 정해져 모든 접속자가 같은 값을 얻는다
+    teamBase(team) {
+      return ZR.MapGen.findSpawn(this.map, U.rng((this.seed ^ U.hashStr(`team${team}#0`)) >>> 0), null);
+    }
 
     // 다른 플레이어와 떨어진 출발 지점 (같은 key면 같은 결과)
     spawnPoint(key) {
@@ -193,25 +200,26 @@
     emitShot(p, wid) {
       const ev = { k: 'shot', o: p.id, w: wid, x: Math.round(p.x), y: Math.round(p.y), a: +p.angle.toFixed(3), tx: Math.round(p.input.ax), ty: Math.round(p.input.ay), s: U.randSeed() };
       ZR.Combat.fire(this, ev);
-      if (this.online && p.id === this.localId && this.hooks.onEvent) this.hooks.onEvent(ev);
+      if (this.online && this.isAuth(p) && this.hooks.onEvent) this.hooks.onEvent(ev);
     }
 
     emitMelee(p) {
       const ev = { k: 'melee', o: p.id, w: p.wid, x: Math.round(p.x), y: Math.round(p.y), a: +p.angle.toFixed(3) };
       ZR.Combat.melee(this, ev);
-      if (this.online && p.id === this.localId && this.hooks.onEvent) this.hooks.onEvent(ev);
+      if (this.online && this.isAuth(p) && this.hooks.onEvent) this.hooks.onEvent(ev);
     }
 
     emitThrow(p, wid) {
       const ev = { k: 'throw', o: p.id, w: wid, x: Math.round(p.x), y: Math.round(p.y), tx: Math.round(p.input.ax), ty: Math.round(p.input.ay) };
       ZR.Combat.throwNade(this, ev);
-      if (this.online && p.id === this.localId && this.hooks.onEvent) this.hooks.onEvent(ev);
+      if (this.online && this.isAuth(p) && this.hooks.onEvent) this.hooks.onEvent(ev);
     }
 
     // 다른 접속자의 공격 이벤트 재생
     playRemoteAttack(ev) {
-      if (ev.o === this.localId) return;
       const p = this.players.get(ev.o);
+      // 내가 계산한 캐릭터(나·내 봇)의 공격은 이미 재생했다
+      if (ev.o === this.localId || (p && this.isAuth(p))) return;
       if (p) {
         if (ev.k === 'melee') p.swingT = 0.22;
         if (ev.k === 'throw') p.swingT = 0.25;
@@ -371,8 +379,10 @@
         target.deathT = this.time;
         this.pushFeed(ev.by, ev.v, ev.w);
       }
-      const me = this.local;
-      if (me && ev.by === this.localId && ev.v !== this.localId) me.kills++;
+      // 내가 계산하는 공격자(나·내 봇)의 킬 수는 여기서 올린다. 피해자도 내 쪽이면 killPlayer에서 이미 셌다
+      const killer = this.players.get(ev.by);
+      const victimHere = target && this.isAuth(target);
+      if (killer && ev.by !== ev.v && this.isAuth(killer) && !victimHere) killer.kills++;
     }
 
     pushFeed(killerId, victimId, wid) {

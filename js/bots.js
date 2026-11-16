@@ -24,13 +24,40 @@
       const team = teamSize > 1 ? Math.floor(slot / teamSize) : (leader ? slot : i + 1);
       const anchor = teamSize > 1 ? anchors.get(team) : null;
       const pos = anchor ? ZR.MapGen.nearbyClear(world.map, anchor.x, anchor.y, rng) : world.spawnPoint(`bot${i}`);
-      const name = NAMES[i % NAMES.length] + (i >= NAMES.length ? `${Math.floor(i / NAMES.length) + 1}` : '');
-      const bot = new ZR.Player(`bot${i}`, name, rng.pick(COLORS), pos.x, pos.y, true);
-      bot.team = team;
-      bot.brain = { think: rng.range(0, THINK_GAP), enemy: null, goal: null, strafe: rng.chance(0.5) ? 1 : -1, strafeT: 0, stuckT: 0, lastX: pos.x, lastY: pos.y, unstickT: 0, unstickA: 0, sightT: 0, toggle: false, aimErr: rng.range(0.05, 0.14) };
-      world.addPlayer(bot);
+      const bot = create(world, i, team, pos, rng);
       if (!anchors.has(team)) anchors.set(team, bot);
     }
+  }
+
+  function create(world, i, team, pos, rng) {
+    const name = NAMES[i % NAMES.length] + (i >= NAMES.length ? `${Math.floor(i / NAMES.length) + 1}` : '');
+    const bot = new ZR.Player(`bot${i}`, name, rng.pick(COLORS), pos.x, pos.y, true);
+    bot.team = team;
+    bot.brain = { think: rng.range(0, THINK_GAP), enemy: null, goal: null, strafe: rng.chance(0.5) ? 1 : -1, strafeT: 0, stuckT: 0, lastX: pos.x, lastY: pos.y, unstickT: 0, unstickA: 0, sightT: 0, toggle: false, aimErr: rng.range(0.05, 0.14) };
+    world.addPlayer(bot);
+    return bot;
+  }
+
+  // 온라인: 방장이 경기 계획(teams[i] = i번째 봇의 팀)대로 봇을 만든다.
+  // 사람 팀의 빈자리를 채우는 봇은 그 팀 출발점 옆에서, 봇끼리 팀은 함께 모여서 출발한다.
+  function spawnOnline(world, teams, humanTeams) {
+    const rng = U.rng((world.seed ^ 0x0b075) >>> 0);
+    const anchors = new Map();
+    teams.forEach((team, i) => {
+      let pos;
+      if (humanTeams.has(team)) {
+        const base = world.teamBase(team);
+        pos = ZR.MapGen.nearbyClear(world.map, base.x, base.y, rng);
+      } else if (anchors.has(team)) {
+        const a = anchors.get(team);
+        pos = ZR.MapGen.nearbyClear(world.map, a.x, a.y, rng);
+      } else {
+        pos = world.spawnPoint(`bot${i}`);
+      }
+      const bot = create(world, i, team, pos, rng);
+      world.ownedBots.add(bot.id);
+      if (!anchors.has(team)) anchors.set(team, bot);
+    });
   }
 
   // 같은 팀의 사람(살아 있고 같은 층)이 멀어지면 따라간다
@@ -254,5 +281,5 @@
     }
   }
 
-  ZR.Bots = Object.freeze({ spawnAll, update, recordPositions, NAMES, COLORS });
+  ZR.Bots = Object.freeze({ spawnAll, spawnOnline, create, update, recordPositions, NAMES, COLORS });
 })(typeof window !== 'undefined' ? window : globalThis);

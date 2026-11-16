@@ -235,3 +235,65 @@ test('스쿼드 봇 경기: 팀이 4명씩 묶이고 팀 단위로 끝난다', (
   console.log(`  스쿼드 ${t.toFixed(0)}초, 남은 팀 ${world.aliveTeams().size}`);
   assert.ok(world.aliveTeams().size <= 1);
 });
+
+test('온라인 봇 채우기: 사람 팀 빈자리부터 채우고 남은 봇은 새 팀으로 묶는다', () => {
+  // 듀오, 사람 3명(1팀 2명, 2팀 1명), 총 8명 → 2팀에 봇 1 + 봇 팀 3·4
+  assert.deepStrictEqual(ZR.Net.planBots({ a: 1, b: 1, c: 2 }, 2, 8), [2, 3, 3, 4, 4]);
+  // 솔로: 봇마다 자기 팀
+  assert.deepStrictEqual(ZR.Net.planBots({ a: 1, b: 2 }, 1, 5), [3, 4, 5]);
+  // 봇 없음 / 사람이 이미 총 인원 이상
+  assert.deepStrictEqual(ZR.Net.planBots({ a: 1 }, 4, 0), []);
+  assert.deepStrictEqual(ZR.Net.planBots({ a: 1, b: 2 }, 1, 2), []);
+  // 스쿼드 1명 + 총 10명 → 우리 팀 봇 3 + 봇 팀(4,2)
+  assert.deepStrictEqual(ZR.Net.planBots({ a: 1 }, 4, 10), [1, 1, 1, 2, 2, 2, 2, 3, 3]);
+});
+
+function hostWorld(events) {
+  const world = new ZR.World({
+    seed: 55, mode: 'online', localId: 'host',
+    hooks: { onEvent: (ev) => events.push(ev), claim: () => Promise.resolve(true), onDrop: () => {}, onDestroy: () => {}, onDeath: (t) => events.push({ k: 'kill', v: t.id }) },
+  });
+  world.teamMode = 'duo';
+  const base = world.teamBase(1);
+  const me = world.addPlayer(new ZR.Player('host', 'H', '#fff', base.x, base.y));
+  me.team = 1;
+  return world;
+}
+
+test('방장 브라우저는 자기 봇을 직접 계산하고, 봇 공격을 이벤트로 보낸다', () => {
+  const events = [];
+  const world = hostWorld(events);
+  const friend = world.addPlayer(new ZR.Player('u2', 'F', '#fff', 900, 900));
+  friend.team = 2;
+  friend.remote = true;
+  ZR.Bots.spawnOnline(world, [1, 2, 3, 3, 4, 4, 5, 5], new Set([1, 2]));
+  const mate = world.players.get('bot0');
+  assert.strictEqual(mate.team, 1);
+  assert.ok(ZR.U.dist(mate.x, mate.y, world.local.x, world.local.y) < 200, '우리 팀 봇은 내 옆에서 출발');
+  assert.ok(world.isAuth(mate) && world.ownsShot('bot0'));
+  assert.ok(!world.isAuth(friend), '친구는 친구 브라우저가 계산');
+  for (let t = 0; t < 90; t += 1 / 30) world.update(1 / 30);
+  const botShots = events.filter((e) => e.k !== 'kill' && String(e.o).startsWith('bot'));
+  assert.ok(botShots.length > 0, `봇 공격 이벤트 ${botShots.length}개`);
+  // 내 봇이 쏜 이벤트가 되돌아와도 다시 재생하지 않는다
+  const before = world.projectiles.length;
+  world.playRemoteAttack({ ...botShots[0], s: 1 });
+  assert.strictEqual(world.projectiles.length, before);
+});
+
+test('킬 집계: 내 봇이 다른 사람을 잡으면 봇 킬이 오르고, 내 쪽에서 난 킬은 두 번 세지 않는다', () => {
+  const world = hostWorld([]);
+  ZR.Bots.spawnOnline(world, [3], new Set([1]));
+  const bot = world.players.get('bot0');
+  const friend = world.addPlayer(new ZR.Player('u2', 'F', '#fff', 900, 900));
+  friend.team = 2;
+  world.remoteKill({ by: 'bot0', v: 'u2', w: 'smg', r: 3 });
+  assert.strictEqual(bot.kills, 1);
+  assert.ok(!friend.alive);
+  // 내가 내 봇을 잡은 경우: killPlayer에서 한 번 세고, 서버에서 되돌아온 킬 이벤트로는 다시 세지 않는다
+  const me = world.local;
+  world.killPlayer(bot, 'host', 'smg');
+  assert.strictEqual(me.kills, 1);
+  world.remoteKill({ by: 'host', v: 'bot0', w: 'smg', r: 2 });
+  assert.strictEqual(me.kills, 1);
+});

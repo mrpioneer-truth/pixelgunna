@@ -146,6 +146,15 @@
           </select>
           <span class="muted">같은 팀 번호를 고른 친구끼리 한 팀 (듀오·스쿼드)</span>
         </label>
+        <label id="roomFillWrap" class="inline">봇으로 채우기
+          <select id="roomFill">
+            <option value="0">봇 없음 (사람끼리)</option>
+            <option value="16">총 16명</option>
+            <option value="25" selected>총 25명</option>
+            <option value="50">총 50명</option>
+          </select>
+          <span class="muted">방장이 정합니다 · 듀오·스쿼드는 우리 팀 빈자리도 봇 팀원이 채웁니다</span>
+        </label>
         <p id="roomInfo" class="muted"></p>
         <button id="btnStart" class="primary big">경기 시작</button>
       </section>
